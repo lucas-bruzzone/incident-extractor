@@ -7,7 +7,7 @@ Execute com: pytest tests/test_integration.py -v --run-integration
 import pytest
 import httpx
 import os
-import asyncio
+import pytest_asyncio
 
 from app.services.llm_service import OllamaService
 from app.services.preprocessor import IncidentPreprocessor
@@ -28,13 +28,12 @@ def is_ollama_available() -> bool:
         return False
 
 
-@pytest.fixture(scope="module")
-def ollama_service():
-    """Cria instância real do OllamaService"""
+@pytest_asyncio.fixture
+async def ollama_service():
     service = OllamaService()
     yield service
-    # Cleanup
-    asyncio.get_event_loop().run_until_complete(service.close())
+    await service.close()
+
 
 
 @pytest.fixture
