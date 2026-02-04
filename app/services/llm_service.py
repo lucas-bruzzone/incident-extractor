@@ -177,34 +177,46 @@ class OllamaService:
                 details="Nenhum conteúdo retornado",
             )
 
-        # Remove blocos markdown
         cleaned = text.replace("```json", "").replace("```", "").strip()
 
-        # Tenta localizar início do JSON
-        start_idx = cleaned.find("{")
-        if start_idx == -1:
+        start = cleaned.find("{")
+        if start == -1:
             raise JSONParsingError(
                 message="Resposta do LLM não contém JSON",
                 details=cleaned[:200],
             )
 
-        candidate = cleaned[start_idx:]
+        brace_count = 0
+        end = None
 
-        # 🔧 CASO CRÍTICO: JSON truncado (faltando })
-        open_braces = candidate.count("{")
-        close_braces = candidate.count("}")
+        for i in range(start, len(cleaned)):
+            char = cleaned[i]
+            if char == "{":
+                brace_count += 1
+            elif char == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end = i
+                    break
 
-        if close_braces < open_braces:
-            candidate = candidate + ("}" * (open_braces - close_braces))
+        if end is not None:
+            json_str = cleaned[start : end + 1]
+        else:
+            candidate = cleaned[start:].rstrip(" \n\r\t.;,")
+            open_braces = candidate.count("{")
+            close_braces = candidate.count("}")
+            if close_braces < open_braces:
+                candidate = candidate + ("}" * (open_braces - close_braces))
+            json_str = candidate
 
         try:
-            return json.loads(candidate)
+            return json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.error(
                 "Erro ao parsear JSON",
                 extra={
                     "error": str(e),
-                    "json_preview": candidate[:200],
+                    "json_preview": json_str[:200],
                 },
             )
             raise JSONParsingError(
