@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Serviço Ollama para LLM local
+  ollama:
+    image: ollama/ollama:latest
+    container_name: incident-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    restart: unless-stopped
+    networks:
+      - incident-network
+
+  # Serviço da API FastAPI
+  api:
+    build: .
+    container_name: incident-api
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=tinyllama
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    networks:
+      - incident-network
+    command: >
+      sh -c "
+        echo 'Aguardando Ollama iniciar...' &&
+        sleep 15 &&
+        echo 'Iniciando API...' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000
+      "
+
+volumes:
+  ollama_data:
+    driver: local
+
+networks:
+  incident-network:
+    driver: bridge
