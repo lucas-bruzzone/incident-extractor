@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 
 
@@ -10,12 +10,13 @@ class IncidentRequest(BaseModel):
         description="Descricao textual do incidente"
     )
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "descricao": "Ontem as 14h, no escritorio de Sao Paulo, houve uma falha no servidor principal que afetou o sistema de faturamento por 2 horas."
             }
         }
+    )
 
 
 class IncidentResponse(BaseModel):
@@ -37,8 +38,8 @@ class IncidentResponse(BaseModel):
         description="Descricao breve do impacto gerado"
     )
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "data_ocorrencia": "2025-02-03 14:00",
                 "local": "Sao Paulo",
@@ -46,3 +47,4 @@ class IncidentResponse(BaseModel):
                 "impacto": "Sistema de faturamento indisponivel por 2 horas"
             }
         }
+    )

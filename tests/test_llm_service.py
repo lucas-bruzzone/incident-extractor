@@ -78,7 +78,7 @@ class TestOllamaServiceConfig:
 
 class TestOllamaServiceAsync:
     """Testes asincronos para o servico"""
-
+    @pytest.mark.asyncio
     async def test_health_check_success(self):
         """Deve retornar True quando Ollama esta disponivel"""
         service = OllamaService()
@@ -90,6 +90,7 @@ class TestOllamaServiceAsync:
         result = await service.health_check()
         assert result is True
 
+    @pytest.mark.asyncio
     async def test_health_check_failure(self):
         """Deve retornar False quando Ollama nao esta disponivel"""
         service = OllamaService()
@@ -99,6 +100,7 @@ class TestOllamaServiceAsync:
         result = await service.health_check()
         assert result is False
 
+    @pytest.mark.asyncio
     async def test_extract_incident_info_success(self):
         """Deve extrair informacoes corretamente"""
         service = OllamaService()
@@ -121,7 +123,8 @@ class TestOllamaServiceAsync:
         assert isinstance(result, IncidentResponse)
         assert result.local == "Sao Paulo"
         assert result.tipo_incidente == "Falha no servidor"
-
+        
+    @pytest.mark.asyncio
     async def test_close_client(self):
         """Deve fechar cliente HTTP corretamente"""
         service = OllamaService()
