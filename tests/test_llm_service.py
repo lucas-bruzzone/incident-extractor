@@ -2,10 +2,11 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-import json
+import httpx
 
 from app.services.llm_service import OllamaService
 from app.models import IncidentResponse
+from app.exceptions import LLMConnectionError, LLMTimeoutError, JSONParsingError
 
 
 class TestOllamaServiceExtractJson:
@@ -39,19 +40,19 @@ class TestOllamaServiceExtractJson:
         result = service._extract_json(text)
         assert result["local"] == "BH"
 
-    def test_extract_json_invalid_raises_exception(self):
-        """Deve lancar excecao para JSON invalido"""
+    def test_extract_json_no_braces_raises_json_parsing_error(self):
+        """Deve lancar JSONParsingError para resposta sem chaves"""
         service = OllamaService()
         text = "Resposta sem JSON"
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(JSONParsingError) as exc_info:
             service._extract_json(text)
-        assert "JSON valido" in str(exc_info.value)
+        assert "JSON" in exc_info.value.message
 
-    def test_extract_json_malformed_raises_exception(self):
-        """Deve lancar excecao para JSON malformado"""
+    def test_extract_json_malformed_raises_json_parsing_error(self):
+        """Deve lancar JSONParsingError para JSON malformado"""
         service = OllamaService()
         text = '{"local": "SP", "tipo_incidente": }'
-        with pytest.raises(Exception):
+        with pytest.raises(JSONParsingError):
             service._extract_json(text)
 
 
@@ -67,9 +68,7 @@ class TestOllamaServiceConfig:
     def test_custom_config(self):
         """Deve aceitar configuracao customizada"""
         service = OllamaService(
-            base_url="http://custom:1234",
-            model="custom-model",
-            timeout=60.0
+            base_url="http://custom:1234", model="custom-model", timeout=60.0
         )
         assert service.base_url == "http://custom:1234"
         assert service.model == "custom-model"
@@ -78,15 +77,16 @@ class TestOllamaServiceConfig:
 
 class TestOllamaServiceAsync:
     """Testes asincronos para o servico"""
+
     @pytest.mark.asyncio
     async def test_health_check_success(self):
         """Deve retornar True quando Ollama esta disponivel"""
         service = OllamaService()
         service.client = AsyncMock()
-        service.client.get = AsyncMock(return_value=MagicMock(
-            raise_for_status=MagicMock()
-        ))
-        
+        service.client.get = AsyncMock(
+            return_value=MagicMock(raise_for_status=MagicMock())
+        )
+
         result = await service.health_check()
         assert result is True
 
@@ -96,7 +96,7 @@ class TestOllamaServiceAsync:
         service = OllamaService()
         service.client = AsyncMock()
         service.client.get = AsyncMock(side_effect=Exception("Connection refused"))
-        
+
         result = await service.health_check()
         assert result is False
 
@@ -104,32 +104,52 @@ class TestOllamaServiceAsync:
     async def test_extract_incident_info_success(self):
         """Deve extrair informacoes corretamente"""
         service = OllamaService()
-        
+
         mock_response = {
             "response": '{"data_ocorrencia": "2025-02-03 14:00", "local": "Sao Paulo", "tipo_incidente": "Falha no servidor", "impacto": "Sistema indisponivel"}'
         }
-        
+
         service.client = AsyncMock()
-        service.client.post = AsyncMock(return_value=MagicMock(
-            raise_for_status=MagicMock(),
-            json=MagicMock(return_value=mock_response)
-        ))
-        
-        result = await service.extract_incident_info(
-            "Ontem houve falha no servidor de SP",
-            "2025-02-04"
+        service.client.post = AsyncMock(
+            return_value=MagicMock(
+                raise_for_status=MagicMock(), json=MagicMock(return_value=mock_response)
+            )
         )
-        
+
+        result = await service.extract_incident_info(
+            "Ontem houve falha no servidor de SP", "2025-02-04"
+        )
+
         assert isinstance(result, IncidentResponse)
         assert result.local == "Sao Paulo"
         assert result.tipo_incidente == "Falha no servidor"
-        
+
+    @pytest.mark.asyncio
+    async def test_generate_timeout_raises_llm_timeout_error(self):
+        """Deve lancar LLMTimeoutError em timeout"""
+        service = OllamaService()
+        service.client = AsyncMock()
+        service.client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+
+        with pytest.raises(LLMTimeoutError):
+            await service._generate("test prompt")
+
+    @pytest.mark.asyncio
+    async def test_generate_connection_error_raises_llm_connection_error(self):
+        """Deve lancar LLMConnectionError em erro de conexao"""
+        service = OllamaService()
+        service.client = AsyncMock()
+        service.client.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
+
+        with pytest.raises(LLMConnectionError):
+            await service._generate("test prompt")
+
     @pytest.mark.asyncio
     async def test_close_client(self):
         """Deve fechar cliente HTTP corretamente"""
         service = OllamaService()
         service.client = AsyncMock()
         service.client.aclose = AsyncMock()
-        
+
         await service.close()
         service.client.aclose.assert_called_once()

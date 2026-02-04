@@ -8,6 +8,12 @@ from app.main import app
 from app.models import IncidentResponse
 from app.services.llm_service import OllamaService
 from app.services.preprocessor import IncidentPreprocessor
+from app.exceptions import (
+    LLMConnectionError,
+    LLMTimeoutError,
+    JSONParsingError,
+    PreprocessingError,
+)
 
 
 @pytest.fixture
@@ -17,11 +23,14 @@ def mock_services():
     mock_ollama.health_check = AsyncMock(return_value=True)
     mock_ollama.extract_incident_info = AsyncMock()
     mock_ollama.base_url = "http://ollama:11434"
+    mock_ollama.model = "qwen2:0.5b"
     mock_ollama.client = MagicMock()
-    
+
     mock_preprocessor = MagicMock(spec=IncidentPreprocessor)
-    mock_preprocessor.preprocess = MagicMock(return_value=("texto processado", "2025-02-04"))
-    
+    mock_preprocessor.preprocess = MagicMock(
+        return_value=("texto processado", "2025-02-04")
+    )
+
     return mock_ollama, mock_preprocessor
 
 
@@ -29,9 +38,10 @@ def mock_services():
 def client(mock_services):
     """Cliente de teste com mocks"""
     mock_ollama, mock_preprocessor = mock_services
-    
-    with patch("app.main.ollama_service", mock_ollama), \
-         patch("app.main.preprocessor", mock_preprocessor):
+
+    with patch("app.main.ollama_service", mock_ollama), patch(
+        "app.main.preprocessor", mock_preprocessor
+    ):
         yield TestClient(app, raise_server_exceptions=False)
 
 
@@ -75,6 +85,13 @@ class TestHealthEndpoint:
         assert "ollama_status" in data
         assert "timestamp" in data
 
+    def test_health_returns_model_info(self, client, mock_services):
+        """Deve retornar informacoes do modelo"""
+        response = client.get("/health")
+        data = response.json()
+        assert "ollama_url" in data
+        assert "model" in data
+
 
 class TestExtractIncidentEndpoint:
     """Testes para o endpoint de extracao"""
@@ -101,30 +118,85 @@ class TestExtractIncidentEndpoint:
             data_ocorrencia="2025-02-03 14:00",
             local="Sao Paulo",
             tipo_incidente="Falha no servidor",
-            impacto="Sistema indisponivel"
+            impacto="Sistema indisponivel",
         )
-        
+
         response = client.post(
             "/extract-incident",
-            json={"descricao": "Ontem houve uma falha no servidor de Sao Paulo"}
+            json={"descricao": "Ontem houve uma falha no servidor de Sao Paulo"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["local"] == "Sao Paulo"
         assert data["tipo_incidente"] == "Falha no servidor"
 
-    def test_extract_handles_llm_error(self, client, mock_services):
-        """Deve retornar 500 quando LLM falha"""
+
+class TestErrorHandlers:
+    """Testes para os handlers de erro customizados"""
+
+    def test_llm_connection_error_returns_502(self, client, mock_services):
+        """Deve retornar 502 para erro de conexao"""
         mock_ollama, _ = mock_services
-        mock_ollama.extract_incident_info.side_effect = Exception("LLM error")
-        
+        mock_ollama.extract_incident_info.side_effect = LLMConnectionError(
+            message="Não foi possível conectar", details="Connection refused"
+        )
+
         response = client.post(
             "/extract-incident",
-            json={"descricao": "Descricao de teste para o incidente"}
+            json={"descricao": "Descricao de teste para o incidente"},
         )
-        
-        assert response.status_code == 500
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error"] == "llm_connection_error"
+        assert "suggestion" in data
+
+    def test_llm_timeout_error_returns_504(self, client, mock_services):
+        """Deve retornar 504 para timeout"""
+        mock_ollama, _ = mock_services
+        mock_ollama.extract_incident_info.side_effect = LLMTimeoutError(
+            message="Timeout", details="180s exceeded"
+        )
+
+        response = client.post(
+            "/extract-incident",
+            json={"descricao": "Descricao de teste para o incidente"},
+        )
+
+        assert response.status_code == 504
+        data = response.json()
+        assert data["error"] == "llm_timeout_error"
+
+    def test_json_parsing_error_returns_422(self, client, mock_services):
+        """Deve retornar 422 para erro de parsing JSON"""
+        mock_ollama, _ = mock_services
+        mock_ollama.extract_incident_info.side_effect = JSONParsingError(
+            message="JSON inválido", details="Unexpected token"
+        )
+
+        response = client.post(
+            "/extract-incident",
+            json={"descricao": "Descricao de teste para o incidente"},
+        )
+
+        assert response.status_code == 422
+        data = response.json()
+        assert data["error"] == "json_parsing_error"
+
+    def test_preprocessing_error_returns_400(self, client, mock_services):
+        """Deve retornar 400 para erro de preprocessamento"""
+        _, mock_preprocessor = mock_services
+        mock_preprocessor.preprocess.side_effect = Exception("Encoding error")
+
+        response = client.post(
+            "/extract-incident",
+            json={"descricao": "Descricao de teste para o incidente"},
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["error"] == "preprocessing_error"
 
 
 class TestModelsEndpoint:
@@ -137,7 +209,7 @@ class TestModelsEndpoint:
         mock_response.json.return_value = {"models": [{"name": "qwen2:0.5b"}]}
         mock_response.raise_for_status = MagicMock()
         mock_ollama.client.get = AsyncMock(return_value=mock_response)
-        
+
         response = client.get("/models")
         assert response.status_code == 200
 
@@ -152,17 +224,19 @@ class TestAPIIntegration:
             data_ocorrencia="2025-02-03 14:00",
             local="Brasilia",
             tipo_incidente="Queda de energia",
-            impacto="Data center afetado"
+            impacto="Data center afetado",
         )
-        
+
         # Testa health
         health = client.get("/health")
         assert health.status_code == 200
-        
+
         # Testa extracao
         extract = client.post(
             "/extract-incident",
-            json={"descricao": "Ontem houve queda de energia no data center de Brasilia"}
+            json={
+                "descricao": "Ontem houve queda de energia no data center de Brasilia"
+            },
         )
         assert extract.status_code == 200
         assert extract.json()["local"] == "Brasilia"

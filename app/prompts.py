@@ -47,6 +47,5 @@ def build_extraction_prompt(incident_description: str, reference_date: str) -> s
     Constroi o prompt completo para extracao de informacoes
     """
     return INCIDENT_EXTRACTION_PROMPT.format(
-        incident_description=incident_description,
-        reference_date=reference_date
+        incident_description=incident_description, reference_date=reference_date
     )

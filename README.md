@@ -162,23 +162,8 @@ A primeira requisicao pode demorar mais (carregamento do modelo na memoria). Agu
 
 ### Curto Prazo
 - [x] Adicionar testes unitarios e de integracao (pytest)
-- [ ] Implementar cache de respostas para textos similares (Redis)
-- [ ] Adicionar validacao de formato de data no response
-- [ ] Melhorar tratamento de erros com mensagens mais descritivas
-
-### Medio Prazo
-- [ ] Suporte a multiplos idiomas no prompt
-- [ ] Endpoint de batch processing para multiplos incidentes
-- [ ] Metricas de observabilidade (Prometheus/Grafana)
-- [ ] Rate limiting para protecao da API
-- [ ] Autenticacao via API Key ou JWT
-
-### Longo Prazo
-- [ ] CI/CD com GitHub Actions
-- [ ] Deploy em cloud (AWS ECS/Lambda ou GCP Cloud Run)
-- [ ] Fine-tuning do modelo para dominio especifico de incidentes
-- [ ] Interface web para submissao de incidentes
-- [ ] Integracao com sistemas de ticketing (Jira, ServiceNow)
+- [x] Adicionar validacao de formato de data no response
+- [x] Melhorar tratamento de erros com mensagens mais descritivas
 
 ---
 

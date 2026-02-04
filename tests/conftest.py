@@ -38,8 +38,8 @@ def sample_incidents():
                 "data_ocorrencia": "2025-02-03 14:00",
                 "local": "Sao Paulo",
                 "tipo_incidente": "Falha no servidor",
-                "impacto": "Sistema de faturamento indisponivel por 2 horas"
-            }
+                "impacto": "Sistema de faturamento indisponivel por 2 horas",
+            },
         },
         {
             "input": "Hoje pela manha houve queda de energia no data center de Brasilia.",
@@ -47,8 +47,8 @@ def sample_incidents():
                 "data_ocorrencia": "2025-02-04 09:00",
                 "local": "Brasilia",
                 "tipo_incidente": "Queda de energia",
-                "impacto": "Data center afetado"
-            }
+                "impacto": "Data center afetado",
+            },
         },
         {
             "input": "Vazamento de dados detectado pela equipe de seguranca.",
@@ -56,9 +56,9 @@ def sample_incidents():
                 "data_ocorrencia": None,
                 "local": None,
                 "tipo_incidente": "Vazamento de dados",
-                "impacto": "Dados comprometidos"
-            }
-        }
+                "impacto": "Dados comprometidos",
+            },
+        },
     ]
 
 
@@ -69,5 +69,5 @@ def mock_ollama_response():
         data_ocorrencia="2025-02-03 14:00",
         local="Sao Paulo",
         tipo_incidente="Falha no servidor",
-        impacto="Sistema de faturamento indisponivel por 2 horas"
+        impacto="Sistema de faturamento indisponivel por 2 horas",
     )
