@@ -166,55 +166,51 @@ class OllamaService:
             )
 
     def _extract_json(self, text: str) -> Dict:
-        """
-        Extrai JSON da resposta do LLM
-
-        Raises:
-            JSONParsingError: Se não conseguir extrair JSON válido
-        """
         logger.info(
             "Processando resposta do LLM",
             extra={"response_preview": text[:200] if text else "empty"},
         )
 
-        text = text.strip()
-        text = text.replace("```json", "").replace("```", "")
-        text = text.strip()
-
-        start_idx = text.find("{")
-        end_idx = text.rfind("}")
-
-        if start_idx == -1 or end_idx == -1:
-            logger.error(
-                "Resposta sem JSON valido", extra={"response_preview": text[:200]}
+        if not text:
+            raise JSONParsingError(
+                message="Resposta vazia do LLM",
+                details="Nenhum conteúdo retornado",
             )
+
+        # Remove blocos markdown
+        cleaned = text.replace("```json", "").replace("```", "").strip()
+
+        # Tenta localizar início do JSON
+        start_idx = cleaned.find("{")
+        if start_idx == -1:
             raise JSONParsingError(
                 message="Resposta do LLM não contém JSON",
-                details=f"Resposta recebida: {text[:200]}...",
+                details=cleaned[:200],
             )
 
-        json_str = text[start_idx : end_idx + 1]
+        candidate = cleaned[start_idx:]
+
+        # 🔧 CASO CRÍTICO: JSON truncado (faltando })
+        open_braces = candidate.count("{")
+        close_braces = candidate.count("}")
+
+        if close_braces < open_braces:
+            candidate = candidate + ("}" * (open_braces - close_braces))
 
         try:
-            return json.loads(json_str)
+            return json.loads(candidate)
         except json.JSONDecodeError as e:
             logger.error(
                 "Erro ao parsear JSON",
-                extra={"error": str(e), "json_preview": json_str[:200]},
+                extra={
+                    "error": str(e),
+                    "json_preview": candidate[:200],
+                },
             )
-
-            # Tenta corrigir quebras de linha dentro de strings
-            import re
-
-            json_str_fixed = re.sub(r'"\s*\n\s*', '" ', json_str)
-
-            try:
-                return json.loads(json_str_fixed)
-            except json.JSONDecodeError:
-                raise JSONParsingError(
-                    message="JSON malformado na resposta do LLM",
-                    details=f"Erro: {str(e)}. JSON: {json_str[:200]}...",
-                )
+            raise JSONParsingError(
+                message="JSON malformado na resposta do LLM",
+                details=str(e),
+            )
 
     async def health_check(self) -> bool:
         """

@@ -35,7 +35,6 @@ async def ollama_service():
     await service.close()
 
 
-
 @pytest.fixture
 def preprocessor():
     """Instância do preprocessador"""
