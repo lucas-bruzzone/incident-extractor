@@ -79,11 +79,54 @@ incident-extractor/
 │       ├── __init__.py
 │       ├── llm_service.py   # Cliente Ollama
 │       └── preprocessor.py  # Pre-processamento
+├── tests/
+│   ├── conftest.py          # Fixtures
+│   ├── test_api.py          # Testes da API
+│   ├── test_llm_service.py  # Testes do LLM service
+│   ├── test_models.py       # Testes dos models
+│   ├── test_preprocessor.py # Testes do preprocessor
+│   └── test_prompts.py      # Testes dos prompts
 ├── requirements.txt
+├── pytest.ini
 ├── Dockerfile
 ├── docker-compose.yml
 ├── entrypoint.sh
 └── README.md
+```
+
+## Testes
+
+O projeto inclui testes unitarios e de integracao com pytest.
+
+### Executar testes localmente
+
+```bash
+# Instale as dependencias
+pip install -r requirements.txt
+
+# Execute todos os testes
+pytest tests/ -v
+
+# Execute com cobertura
+pytest tests/ -v --cov=app --cov-report=term-missing
+```
+
+### Executar testes no Docker
+
+```bash
+docker-compose exec api pytest tests/ -v
+```
+
+### Estrutura dos testes
+
+```
+tests/
+├── conftest.py          # Fixtures compartilhadas
+├── test_api.py          # Testes de integracao da API
+├── test_llm_service.py  # Testes do cliente Ollama
+├── test_models.py       # Testes dos schemas Pydantic
+├── test_preprocessor.py # Testes do pre-processador
+└── test_prompts.py      # Testes do modulo de prompts
 ```
 
 ## Troubleshooting
@@ -118,7 +161,7 @@ A primeira requisicao pode demorar mais (carregamento do modelo na memoria). Agu
 ## Proximos Passos
 
 ### Curto Prazo
-- [ ] Adicionar testes unitarios e de integracao (pytest)
+- [x] Adicionar testes unitarios e de integracao (pytest)
 - [ ] Implementar cache de respostas para textos similares (Redis)
 - [ ] Adicionar validacao de formato de data no response
 - [ ] Melhorar tratamento de erros com mensagens mais descritivas
