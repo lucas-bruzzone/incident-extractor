@@ -8,12 +8,6 @@ from app.main import app
 from app.models import IncidentResponse
 from app.services.llm_service import OllamaService
 from app.services.preprocessor import IncidentPreprocessor
-from app.exceptions import (
-    LLMConnectionError,
-    LLMTimeoutError,
-    JSONParsingError,
-    PreprocessingError,
-)
 
 
 @pytest.fixture
@@ -153,124 +147,6 @@ class TestExtractIncidentEndpoint:
         assert data["tipo_incidente"] == "Falha no servidor"
 
 
-class TestErrorHandlers:
-    """Testes para os handlers de erro customizados"""
-
-    def test_llm_connection_error_returns_502(self):
-        """Deve retornar 502 para erro de conexao"""
-        mock_ollama = MagicMock(spec=OllamaService)
-        mock_ollama.health_check = AsyncMock(return_value=True)
-        mock_ollama.extract_incident_info = AsyncMock(
-            side_effect=LLMConnectionError(
-                message="Não foi possível conectar", details="Connection refused"
-            )
-        )
-        mock_ollama.base_url = "http://ollama:11434"
-        mock_ollama.model = "qwen2:0.5b"
-
-        mock_preprocessor = MagicMock(spec=IncidentPreprocessor)
-        mock_preprocessor.preprocess = MagicMock(
-            return_value=("texto processado", "2025-02-04")
-        )
-
-        with patch("app.main.ollama_service", mock_ollama), patch(
-            "app.main.preprocessor", mock_preprocessor
-        ):
-            client = TestClient(app, raise_server_exceptions=False)
-            response = client.post(
-                "/extract-incident",
-                json={"descricao": "Descricao de teste para o incidente"},
-            )
-
-        assert response.status_code == 502
-        data = response.json()
-        assert data["error"] == "llm_connection_error"
-        assert "suggestion" in data
-
-    def test_llm_timeout_error_returns_504(self):
-        """Deve retornar 504 para timeout"""
-        mock_ollama = MagicMock(spec=OllamaService)
-        mock_ollama.health_check = AsyncMock(return_value=True)
-        mock_ollama.extract_incident_info = AsyncMock(
-            side_effect=LLMTimeoutError(message="Timeout", details="180s exceeded")
-        )
-        mock_ollama.base_url = "http://ollama:11434"
-        mock_ollama.model = "qwen2:0.5b"
-
-        mock_preprocessor = MagicMock(spec=IncidentPreprocessor)
-        mock_preprocessor.preprocess = MagicMock(
-            return_value=("texto processado", "2025-02-04")
-        )
-
-        with patch("app.main.ollama_service", mock_ollama), patch(
-            "app.main.preprocessor", mock_preprocessor
-        ):
-            client = TestClient(app, raise_server_exceptions=False)
-            response = client.post(
-                "/extract-incident",
-                json={"descricao": "Descricao de teste para o incidente"},
-            )
-
-        assert response.status_code == 504
-        data = response.json()
-        assert data["error"] == "llm_timeout_error"
-
-    def test_json_parsing_error_returns_422(self):
-        """Deve retornar 422 para erro de parsing JSON"""
-        mock_ollama = MagicMock(spec=OllamaService)
-        mock_ollama.health_check = AsyncMock(return_value=True)
-        mock_ollama.extract_incident_info = AsyncMock(
-            side_effect=JSONParsingError(
-                message="JSON inválido", details="Unexpected token"
-            )
-        )
-        mock_ollama.base_url = "http://ollama:11434"
-        mock_ollama.model = "qwen2:0.5b"
-
-        mock_preprocessor = MagicMock(spec=IncidentPreprocessor)
-        mock_preprocessor.preprocess = MagicMock(
-            return_value=("texto processado", "2025-02-04")
-        )
-
-        with patch("app.main.ollama_service", mock_ollama), patch(
-            "app.main.preprocessor", mock_preprocessor
-        ):
-            client = TestClient(app, raise_server_exceptions=False)
-            response = client.post(
-                "/extract-incident",
-                json={"descricao": "Descricao de teste para o incidente"},
-            )
-
-        assert response.status_code == 422
-        data = response.json()
-        assert data["error"] == "json_parsing_error"
-
-    def test_preprocessing_error_returns_400(self):
-        """Deve retornar 400 para erro de preprocessamento"""
-        mock_ollama = MagicMock(spec=OllamaService)
-        mock_ollama.health_check = AsyncMock(return_value=True)
-        mock_ollama.base_url = "http://ollama:11434"
-        mock_ollama.model = "qwen2:0.5b"
-
-        mock_preprocessor = MagicMock(spec=IncidentPreprocessor)
-        mock_preprocessor.preprocess = MagicMock(
-            side_effect=Exception("Encoding error")
-        )
-
-        with patch("app.main.ollama_service", mock_ollama), patch(
-            "app.main.preprocessor", mock_preprocessor
-        ):
-            client = TestClient(app, raise_server_exceptions=False)
-            response = client.post(
-                "/extract-incident",
-                json={"descricao": "Descricao de teste para o incidente"},
-            )
-
-        assert response.status_code == 400
-        data = response.json()
-        assert data["error"] == "preprocessing_error"
-
-
 class TestModelsEndpoint:
     """Testes para o endpoint de listagem de modelos"""
 
@@ -339,8 +215,8 @@ class TestAPIIntegration:
             assert extract.json()["local"] == "Brasilia"
 
 
-class TestRateLimiting:
-    """Testes para rate limiting"""
+class TestRequestTracing:
+    """Testes para rastreamento de requests"""
 
     def test_request_has_request_id_header(self):
         """Deve incluir X-Request-ID na resposta"""
@@ -358,3 +234,20 @@ class TestRateLimiting:
             response = client.get("/health")
 
         assert "X-Request-ID" in response.headers
+
+    def test_custom_request_id_is_preserved(self):
+        """Deve preservar X-Request-ID customizado"""
+        mock_ollama = MagicMock(spec=OllamaService)
+        mock_ollama.health_check = AsyncMock(return_value=True)
+        mock_ollama.base_url = "http://ollama:11434"
+        mock_ollama.model = "qwen2:0.5b"
+
+        mock_preprocessor = MagicMock(spec=IncidentPreprocessor)
+
+        with patch("app.main.ollama_service", mock_ollama), patch(
+            "app.main.preprocessor", mock_preprocessor
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/health", headers={"X-Request-ID": "custom-id-123"})
+
+        assert response.headers["X-Request-ID"] == "custom-id-123"

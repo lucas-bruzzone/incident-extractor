@@ -214,3 +214,5 @@ Aguarde o tempo indicado no header `Retry-After` ou ajuste os limites via variav
 - **Request ID**: Rastreabilidade de requisicoes end-to-end
 
 ---
+
+Desenvolvido para o teste tecnico A3Data
