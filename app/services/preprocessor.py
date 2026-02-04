@@ -2,9 +2,9 @@
 
 import re
 from datetime import datetime
-import logging
+from app.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class IncidentPreprocessor:
@@ -25,7 +25,14 @@ class IncidentPreprocessor:
         processed_text = self._clean_special_chars(processed_text)
         reference_date = self.reference_date.strftime("%Y-%m-%d")
 
-        logger.info(f"Texto pre-processado. Data de referencia: {reference_date}")
+        logger.info(
+            "Texto pre-processado",
+            extra={
+                "original_length": len(text),
+                "processed_length": len(processed_text),
+                "reference_date": reference_date,
+            },
+        )
 
         return processed_text, reference_date
 
@@ -49,4 +56,6 @@ class IncidentPreprocessor:
     def set_reference_date(self, date: datetime):
         """Define uma data de referencia customizada"""
         self.reference_date = date
-        logger.info(f"Data de referencia atualizada para: {date}")
+        logger.info(
+            "Data de referencia atualizada", extra={"new_date": date.isoformat()}
+        )

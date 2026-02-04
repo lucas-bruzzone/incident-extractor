@@ -14,6 +14,34 @@ from app.services.preprocessor import IncidentPreprocessor
 from app.models import IncidentResponse
 
 
+def pytest_addoption(parser):
+    """Adiciona opção de linha de comando para testes de integração"""
+    parser.addoption(
+        "--run-integration",
+        action="store_true",
+        default=False,
+        help="Executa testes de integração com Ollama real",
+    )
+
+
+def pytest_configure(config):
+    """Registra markers customizados"""
+    config.addinivalue_line(
+        "markers", "integration: marca testes que requerem Ollama real"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Pula testes de integração se --run-integration não for passado"""
+    if config.getoption("--run-integration"):
+        return
+
+    skip_integration = pytest.mark.skip(reason="Requer --run-integration para executar")
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip_integration)
+
+
 @pytest.fixture
 def client():
     """Cliente de teste para a API"""

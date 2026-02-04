@@ -28,6 +28,8 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_MODEL=qwen2:0.5b
+      - RATE_LIMIT_EXTRACT=10/minute
+      - RATE_LIMIT_DEFAULT=60/minute
     depends_on:
       ollama:
         condition: service_healthy

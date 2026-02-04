@@ -2,7 +2,6 @@
 
 import httpx
 import json
-import logging
 import os
 import asyncio
 from typing import Dict
@@ -14,8 +13,9 @@ from app.exceptions import (
     LLMResponseError,
     JSONParsingError,
 )
+from app.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OllamaService:
@@ -30,7 +30,8 @@ class OllamaService:
         self.client = httpx.AsyncClient(timeout=timeout)
 
         logger.info(
-            f"OllamaService inicializado: {self.base_url} | Modelo: {self.model}"
+            "OllamaService inicializado",
+            extra={"base_url": self.base_url, "model": self.model},
         )
 
     async def extract_incident_info(
@@ -47,7 +48,10 @@ class OllamaService:
         """
         prompt = build_extraction_prompt(incident_description, reference_date)
 
-        logger.info(f"Enviando requisicao para Ollama (modelo: {self.model})")
+        logger.info(
+            "Enviando requisicao para Ollama",
+            extra={"model": self.model, "prompt_length": len(prompt)},
+        )
 
         response = await self._generate_with_retry(prompt)
 
@@ -77,8 +81,13 @@ class OllamaService:
                 last_error = e
                 wait_time = 2**attempt
                 logger.warning(
-                    f"Tentativa {attempt + 1}/{max_retries} falhou: {e.message}. "
-                    f"Aguardando {wait_time}s..."
+                    "Tentativa falhou, aguardando retry",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "wait_time": wait_time,
+                        "error": e.message,
+                    },
                 )
                 await asyncio.sleep(wait_time)
             except Exception as e:
@@ -87,8 +96,13 @@ class OllamaService:
                 )
                 wait_time = 2**attempt
                 logger.warning(
-                    f"Tentativa {attempt + 1}/{max_retries} falhou: {str(e)}. "
-                    f"Aguardando {wait_time}s..."
+                    "Tentativa falhou com erro inesperado",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "wait_time": wait_time,
+                        "error": str(e),
+                    },
                 )
                 await asyncio.sleep(wait_time)
 
@@ -125,25 +139,28 @@ class OllamaService:
             return result.get("response", "")
 
         except httpx.TimeoutException as e:
-            logger.error(f"Timeout ao chamar Ollama: {str(e)}")
+            logger.error("Timeout ao chamar Ollama", extra={"error": str(e)})
             raise LLMTimeoutError(
                 message="Tempo limite excedido aguardando resposta do LLM",
                 details=f"Timeout após {self.timeout}s",
             )
         except httpx.ConnectError as e:
-            logger.error(f"Erro de conexao com Ollama: {str(e)}")
+            logger.error("Erro de conexao com Ollama", extra={"error": str(e)})
             raise LLMConnectionError(
                 message="Não foi possível conectar ao serviço Ollama",
                 details=f"Verifique se o Ollama está rodando em {self.base_url}",
             )
         except httpx.HTTPStatusError as e:
-            logger.error(f"Erro HTTP ao chamar Ollama: {e.response.status_code}")
+            logger.error(
+                "Erro HTTP ao chamar Ollama",
+                extra={"status_code": e.response.status_code},
+            )
             raise LLMResponseError(
                 message=f"Ollama retornou erro HTTP {e.response.status_code}",
                 details=e.response.text[:500] if e.response.text else None,
             )
         except httpx.RequestError as e:
-            logger.error(f"Erro de requisicao com Ollama: {str(e)}")
+            logger.error("Erro de requisicao com Ollama", extra={"error": str(e)})
             raise LLMConnectionError(
                 message="Erro na requisição ao Ollama", details=str(e)
             )
@@ -155,7 +172,10 @@ class OllamaService:
         Raises:
             JSONParsingError: Se não conseguir extrair JSON válido
         """
-        logger.info(f"Resposta do LLM (primeiros 500 chars): {text[:500]}")
+        logger.info(
+            "Processando resposta do LLM",
+            extra={"response_preview": text[:200] if text else "empty"},
+        )
 
         text = text.strip()
         text = text.replace("```json", "").replace("```", "")
@@ -165,7 +185,9 @@ class OllamaService:
         end_idx = text.rfind("}")
 
         if start_idx == -1 or end_idx == -1:
-            logger.error(f"Nao ha chaves na resposta: {text[:200]}")
+            logger.error(
+                "Resposta sem JSON valido", extra={"response_preview": text[:200]}
+            )
             raise JSONParsingError(
                 message="Resposta do LLM não contém JSON",
                 details=f"Resposta recebida: {text[:200]}...",
@@ -176,8 +198,10 @@ class OllamaService:
         try:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
-            logger.error(f"Erro ao parsear JSON: {str(e)}")
-            logger.error(f"JSON problematico: {json_str}")
+            logger.error(
+                "Erro ao parsear JSON",
+                extra={"error": str(e), "json_preview": json_str[:200]},
+            )
 
             # Tenta corrigir quebras de linha dentro de strings
             import re
@@ -202,7 +226,7 @@ class OllamaService:
             response.raise_for_status()
             return True
         except Exception as e:
-            logger.error(f"Health check falhou: {str(e)}")
+            logger.error("Health check falhou", extra={"error": str(e)})
             return False
 
     async def close(self):

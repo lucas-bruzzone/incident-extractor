@@ -66,6 +66,46 @@ Acesse: http://localhost:8000/docs
 | `/models` | GET | Lista modelos disponiveis |
 | `/docs` | GET | Documentacao Swagger |
 
+## Funcionalidades
+
+### Logging Estruturado (JSON)
+
+Todos os logs sao emitidos em formato JSON estruturado, facilitando integracao com ferramentas como ELK, Datadog, Splunk, etc.
+
+Exemplo de log:
+```json
+{
+  "timestamp": "2025-02-04T12:00:00.000Z",
+  "level": "INFO",
+  "logger": "app.main",
+  "message": "Request processada",
+  "service": "incident-extractor",
+  "location": {"file": "main.py", "line": 95, "function": "add_request_context"},
+  "extra": {
+    "request_id": "abc-123",
+    "method": "POST",
+    "path": "/extract-incident",
+    "status_code": 200,
+    "duration_ms": 1234.56
+  }
+}
+```
+
+### Rate Limiting
+
+Protecao contra abuso com limite de requisicoes por IP:
+
+- `/extract-incident`: 10 requisicoes/minuto (configuravel via `RATE_LIMIT_EXTRACT`)
+- Endpoints gerais: 60 requisicoes/minuto (configuravel via `RATE_LIMIT_DEFAULT`)
+
+Headers de resposta incluem:
+- `X-RateLimit-Limit`: Limite configurado
+- `Retry-After`: Tempo de espera apos limite excedido
+
+### Request Tracing
+
+Cada requisicao recebe um `X-Request-ID` unico para rastreamento end-to-end.
+
 ## Estrutura do Projeto
 
 ```
@@ -75,6 +115,9 @@ incident-extractor/
 │   ├── main.py              # API FastAPI
 │   ├── models.py            # Schemas Pydantic
 │   ├── prompts.py           # Templates de prompt
+│   ├── exceptions.py        # Excecoes customizadas
+│   ├── logging_config.py    # Configuracao de logging JSON
+│   ├── rate_limiter.py      # Configuracao de rate limiting
 │   └── services/
 │       ├── __init__.py
 │       ├── llm_service.py   # Cliente Ollama
@@ -85,7 +128,11 @@ incident-extractor/
 │   ├── test_llm_service.py  # Testes do LLM service
 │   ├── test_models.py       # Testes dos models
 │   ├── test_preprocessor.py # Testes do preprocessor
-│   └── test_prompts.py      # Testes dos prompts
+│   ├── test_prompts.py      # Testes dos prompts
+│   ├── test_exceptions.py   # Testes das excecoes
+│   ├── test_logging_config.py # Testes do logging
+│   ├── test_rate_limiter.py # Testes do rate limiter
+│   └── test_integration.py  # Testes de integracao reais
 ├── requirements.txt
 ├── pytest.ini
 ├── Dockerfile
@@ -96,38 +143,42 @@ incident-extractor/
 
 ## Testes
 
-O projeto inclui testes unitarios e de integracao com pytest.
-
-### Executar testes localmente
+### Testes Unitarios
 
 ```bash
 # Instale as dependencias
 pip install -r requirements.txt
 
-# Execute todos os testes
-pytest tests/ -v
+# Execute todos os testes unitarios
+pytest tests/ -v --ignore=tests/test_integration.py
 
 # Execute com cobertura
-pytest tests/ -v --cov=app --cov-report=term-missing
+pytest tests/ -v --cov=app --cov-report=term-missing --ignore=tests/test_integration.py
+```
+
+### Testes de Integracao
+
+Testes que rodam contra Ollama real:
+
+```bash
+# Requer Ollama rodando localmente ou via Docker
+pytest tests/test_integration.py -v --run-integration
 ```
 
 ### Executar testes no Docker
 
 ```bash
-docker-compose exec api pytest tests/ -v
+docker-compose exec api pytest tests/ -v --ignore=tests/test_integration.py
 ```
 
-### Estrutura dos testes
+## Variaveis de Ambiente
 
-```
-tests/
-├── conftest.py          # Fixtures compartilhadas
-├── test_api.py          # Testes de integracao da API
-├── test_llm_service.py  # Testes do cliente Ollama
-├── test_models.py       # Testes dos schemas Pydantic
-├── test_preprocessor.py # Testes do pre-processador
-└── test_prompts.py      # Testes do modulo de prompts
-```
+| Variavel | Padrao | Descricao |
+|----------|--------|-----------|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | URL do servico Ollama |
+| `OLLAMA_MODEL` | `qwen2:0.5b` | Modelo a ser utilizado |
+| `RATE_LIMIT_EXTRACT` | `10/minute` | Limite para `/extract-incident` |
+| `RATE_LIMIT_DEFAULT` | `60/minute` | Limite para outros endpoints |
 
 ## Troubleshooting
 
@@ -150,21 +201,16 @@ docker exec incident-ollama ollama pull qwen2:0.5b
 ### Timeout na requisicao
 A primeira requisicao pode demorar mais (carregamento do modelo na memoria). Aguarde ate 3 minutos.
 
+### Rate limit excedido
+Aguarde o tempo indicado no header `Retry-After` ou ajuste os limites via variaveis de ambiente.
+
 ## Decisoes Tecnicas
 
-- **qwen2:0.5b**: Modelo ultra-leve (~400MB), ideal para ambientes com recursos limitados. Roda localmente sem custos de API
-- **FastAPI**: Validacao automatica com Pydantic, documentacao Swagger interativa, suporte async nativo
-- **Retry com backoff**: Resiliencia em caso de falhas temporarias de conexao
-- **Healthcheck Docker**: Garante que Ollama esta pronto antes da API iniciar
-- **Entrypoint automatizado**: Baixa o modelo automaticamente na primeira execucao
-
-## Proximos Passos
-
-### Curto Prazo
-- [x] Adicionar testes unitarios e de integracao (pytest)
-- [x] Adicionar validacao de formato de data no response
-- [x] Melhorar tratamento de erros com mensagens mais descritivas
+- **qwen2:0.5b**: Modelo ultra-leve (~400MB), ideal para ambientes com recursos limitados
+- **FastAPI**: Validacao automatica com Pydantic, documentacao Swagger, suporte async
+- **Logging JSON**: Facilita parsing e analise em ferramentas de observabilidade
+- **Rate Limiting (slowapi)**: Protecao contra abuso, configuravel por endpoint
+- **Retry com backoff**: Resiliencia em caso de falhas temporarias
+- **Request ID**: Rastreabilidade de requisicoes end-to-end
 
 ---
-
-Desenvolvido para o teste tecnico A3Data
