@@ -3,6 +3,7 @@
 import httpx
 import json
 import asyncio
+import re
 from typing import Dict, Any, Optional
 from app.models import IncidentResponse
 from app.prompts import build_extraction_prompt
@@ -116,8 +117,6 @@ class ResponseValidator:
             return None
 
         # Verificar se contém pelo menos números que parecem data
-        import re
-
         if not re.search(r"\d{2,4}[-/]\d{1,2}[-/]\d{1,2}", value):
             logger.warning(
                 "Formato de data não reconhecido",
@@ -183,7 +182,7 @@ class OllamaService:
         response = await self._generate_with_retry(prompt)
 
         # Extrair JSON da resposta
-        json_data = self._extract_json(response)
+        json_data = self._extract_json_robust(response)
 
         # Validar schema se habilitado
         if self.validate_response:
@@ -308,7 +307,16 @@ class OllamaService:
                 message="Erro na requisição ao Ollama", details=str(e)
             )
 
-    def _extract_json(self, text: str) -> Dict:
+    def _extract_json_robust(self, text: str) -> Dict:
+        """
+        Extrai JSON de forma robusta usando regex.
+
+        Estratégia:
+        1. Remove marcadores markdown
+        2. Busca objeto JSON usando regex robusto
+        3. Valida balanceamento de chaves
+        4. Tenta parsear
+        """
         logger.info(
             "Processando resposta do LLM",
             extra={"response_preview": text[:200] if text else "empty"},
@@ -320,20 +328,69 @@ class OllamaService:
                 details="Nenhum conteúdo retornado",
             )
 
+        # Remove marcadores markdown
         cleaned = text.replace("```json", "").replace("```", "").strip()
 
-        start = cleaned.find("{")
-        if start == -1:
+        # Regex robusto: encontra objetos JSON completos
+        # Captura desde { até } correspondente, permitindo nested objects
+        json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
+
+        matches = re.finditer(json_pattern, cleaned, re.DOTALL)
+
+        # Tenta parsear cada match, preferindo o maior
+        candidates = []
+        for match in matches:
+            json_str = match.group(0)
+            if self._is_balanced_json(json_str):
+                candidates.append(json_str)
+
+        if not candidates:
             raise JSONParsingError(
-                message="Resposta do LLM não contém JSON",
+                message="Resposta do LLM não contém JSON válido",
                 details=cleaned[:200],
             )
 
+        # Tenta parsear candidatos (do maior para o menor)
+        candidates.sort(key=len, reverse=True)
+
+        for json_str in candidates:
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                continue
+
+        # Se nenhum funcionou, tenta estratégia de fallback
+        return self._extract_json_fallback(cleaned)
+
+    def _is_balanced_json(self, text: str) -> bool:
+        """Verifica se chaves estão balanceadas"""
+        stack = []
+        for char in text:
+            if char == "{":
+                stack.append(char)
+            elif char == "}":
+                if not stack:
+                    return False
+                stack.pop()
+        return len(stack) == 0
+
+    def _extract_json_fallback(self, text: str) -> Dict:
+        """
+        Estratégia de fallback: encontra primeira { e última } balanceada
+        """
+        start = text.find("{")
+        if start == -1:
+            raise JSONParsingError(
+                message="Resposta do LLM não contém JSON",
+                details=text[:200],
+            )
+
+        # Encontra } correspondente
         brace_count = 0
         end = None
 
-        for i in range(start, len(cleaned)):
-            char = cleaned[i]
+        for i in range(start, len(text)):
+            char = text[i]
             if char == "{":
                 brace_count += 1
             elif char == "}":
@@ -343,9 +400,10 @@ class OllamaService:
                     break
 
         if end is not None:
-            json_str = cleaned[start : end + 1]
+            json_str = text[start : end + 1]
         else:
-            candidate = cleaned[start:].rstrip(" \n\r\t.;,")
+            # Tenta adicionar chaves faltando
+            candidate = text[start:].rstrip(" \n\r\t.;,")
             open_braces = candidate.count("{")
             close_braces = candidate.count("}")
             if close_braces < open_braces:

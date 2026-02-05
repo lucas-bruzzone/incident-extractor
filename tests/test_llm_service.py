@@ -147,7 +147,7 @@ class TestOllamaServiceExtractJson:
             service = OllamaService()
 
         text = '{"data_ocorrencia": "2025-02-03 14:00", "local": "Sao Paulo", "tipo_incidente": "Falha", "impacto": "Alto"}'
-        result = service._extract_json(text)
+        result = service._extract_json_robust(text)
         assert result["local"] == "Sao Paulo"
 
     def test_extract_json_with_markdown(self):
@@ -164,7 +164,7 @@ class TestOllamaServiceExtractJson:
             service = OllamaService()
 
         text = '```json\n{"data_ocorrencia": null, "local": "Rio", "tipo_incidente": "Teste", "impacto": "Baixo"}\n```'
-        result = service._extract_json(text)
+        result = service._extract_json_robust(text)
         assert result["local"] == "Rio"
 
     def test_extract_json_with_text_before(self):
@@ -181,7 +181,7 @@ class TestOllamaServiceExtractJson:
             service = OllamaService()
 
         text = 'Aqui esta o resultado:\n{"data_ocorrencia": null, "local": "SP", "tipo_incidente": "Erro", "impacto": "Medio"}'
-        result = service._extract_json(text)
+        result = service._extract_json_robust(text)
         assert result["local"] == "SP"
 
     def test_extract_json_with_text_after(self):
@@ -198,7 +198,7 @@ class TestOllamaServiceExtractJson:
             service = OllamaService()
 
         text = '{"data_ocorrencia": null, "local": "BH", "tipo_incidente": "Bug", "impacto": "Alto"}\nEspero que ajude!'
-        result = service._extract_json(text)
+        result = service._extract_json_robust(text)
         assert result["local"] == "BH"
 
     def test_extract_json_no_braces_raises_json_parsing_error(self):
@@ -216,7 +216,7 @@ class TestOllamaServiceExtractJson:
 
         text = "Resposta sem JSON"
         with pytest.raises(JSONParsingError) as exc_info:
-            service._extract_json(text)
+            service._extract_json_robust(text)
         assert "JSON" in exc_info.value.message
 
     def test_extract_json_malformed_raises_json_parsing_error(self):
@@ -234,7 +234,7 @@ class TestOllamaServiceExtractJson:
 
         text = '{"local": "SP", "tipo_incidente": }'
         with pytest.raises(JSONParsingError):
-            service._extract_json(text)
+            service._extract_json_robust(text)
 
 
 class TestOllamaServiceConfig:

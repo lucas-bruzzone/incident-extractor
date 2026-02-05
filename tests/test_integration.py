@@ -8,10 +8,16 @@ import pytest
 import httpx
 import os
 import pytest_asyncio
+from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.services.llm_service import OllamaService
 from app.services.preprocessor import IncidentPreprocessor
 from app.models import IncidentResponse
+from app.exceptions import (
+    LLMConnectionError,
+    LLMTimeoutError,
+    JSONParsingError,
+)
 
 
 # Marca todos os testes deste módulo como integração
@@ -151,6 +157,129 @@ class TestIncidentExtraction:
         assert result.tipo_incidente is not None
 
 
+class TestErrorHandling:
+    """Testes de tratamento de erros"""
+
+    @pytest.mark.asyncio
+    async def test_connection_error(self):
+        """Deve lançar erro quando Ollama não está disponível"""
+        service = OllamaService(base_url="http://invalid-host:99999", timeout=2.0)
+
+        # Pode ser timeout ou connection error dependendo da implementação httpx
+        with pytest.raises((LLMConnectionError, LLMTimeoutError)):
+            await service.extract_incident_info("Teste", "2025-02-04")
+
+        await service.close()
+
+    @pytest.mark.asyncio
+    async def test_timeout_error(self):
+        """Deve lançar LLMTimeoutError em timeout"""
+        service = OllamaService(timeout=0.001)  # Timeout muito curto
+
+        with pytest.raises((LLMTimeoutError, LLMConnectionError)):
+            await service.extract_incident_info("Teste incidente", "2025-02-04")
+
+        await service.close()
+
+    @pytest.mark.asyncio
+    async def test_malformed_response(self):
+        """Deve lidar com resposta malformada do LLM"""
+        with patch("app.services.llm_service.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                ollama_base_url="http://localhost:11434",
+                ollama_model="test",
+                ollama_timeout=60.0,
+                ollama_max_retries=1,
+                validate_llm_response=True,
+                allow_partial_response=True,
+            )
+            service = OllamaService()
+
+        # Mock resposta sem JSON
+        service.client = AsyncMock()
+        service.client.post = AsyncMock(
+            return_value=MagicMock(
+                raise_for_status=MagicMock(),
+                json=MagicMock(return_value={"response": "Resposta sem JSON válido"}),
+            )
+        )
+
+        with pytest.raises(JSONParsingError) as exc_info:
+            await service.extract_incident_info("Teste", "2025-02-04")
+
+        assert "JSON" in exc_info.value.message
+        await service.close()
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_format(self):
+        """Deve lançar erro para JSON malformado"""
+        with patch("app.services.llm_service.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                ollama_base_url="http://localhost:11434",
+                ollama_model="test",
+                ollama_timeout=60.0,
+                ollama_max_retries=1,
+                validate_llm_response=True,
+                allow_partial_response=True,
+            )
+            service = OllamaService()
+
+        # Mock JSON inválido
+        service.client = AsyncMock()
+        service.client.post = AsyncMock(
+            return_value=MagicMock(
+                raise_for_status=MagicMock(),
+                json=MagicMock(return_value={"response": '{"local": "SP", "tipo": '}),
+            )
+        )
+
+        with pytest.raises(JSONParsingError):
+            await service.extract_incident_info("Teste", "2025-02-04")
+
+        await service.close()
+
+    @pytest.mark.asyncio
+    async def test_retry_mechanism(self):
+        """Deve fazer retry em caso de falha temporária"""
+        with patch("app.services.llm_service.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                ollama_base_url="http://localhost:11434",
+                ollama_model="test",
+                ollama_timeout=60.0,
+                ollama_max_retries=3,
+                validate_llm_response=True,
+                allow_partial_response=True,
+            )
+            service = OllamaService()
+
+        # Mock: primeira tentativa falha, segunda sucede
+        call_count = 0
+
+        async def mock_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ConnectError("Connection failed")
+            else:
+                return MagicMock(
+                    raise_for_status=MagicMock(),
+                    json=MagicMock(
+                        return_value={
+                            "response": '{"data_ocorrencia": null, "local": "SP", "tipo_incidente": "Falha", "impacto": "Alto"}'
+                        }
+                    ),
+                )
+
+        service.client = AsyncMock()
+        service.client.post = AsyncMock(side_effect=mock_post)
+
+        result = await service.extract_incident_info("Teste", "2025-02-04")
+
+        assert isinstance(result, IncidentResponse)
+        assert call_count == 2  # Falhou uma vez, sucedeu na segunda
+        await service.close()
+
+
 class TestEdgeCases:
     """Testes de casos extremos"""
 
@@ -267,4 +396,19 @@ class TestTimeout:
         """Deve respeitar timeout customizado"""
         service = OllamaService(timeout=5.0)
         assert service.timeout == 5.0
+        await service.close()
+
+
+class TestModelNotAvailable:
+    """Testes para modelo não disponível"""
+
+    @pytest.mark.asyncio
+    async def test_model_not_found_error(self):
+        """Deve lidar com modelo não disponível"""
+        service = OllamaService(model="modelo-inexistente")
+
+        # Pode lançar diferentes erros dependendo da resposta do Ollama
+        with pytest.raises((LLMConnectionError, LLMTimeoutError, Exception)):
+            await service.extract_incident_info("Teste", "2025-02-04")
+
         await service.close()
