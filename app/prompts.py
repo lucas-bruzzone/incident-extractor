@@ -1,50 +1,62 @@
 """Templates de prompt para extracao de informacoes de incidentes"""
 
-INCIDENT_EXTRACTION_PROMPT = """You are an assistant specialized in extracting structured information from incident descriptions.
+INCIDENT_EXTRACTION_PROMPT = """Você é um assistente especializado em extrair informações estruturadas de descrições de incidentes.
 
-Analyze the incident description and extract the following information in JSON format:
-- data_ocorrencia: date and time of the incident in YYYY-MM-DD HH:MM format (if mentioned)
-- local: location where the incident occurred
-- tipo_incidente: type or category of the incident
-- impacto: brief description of the impact caused
+Analise a descrição do incidente e extraia as seguintes informações em formato JSON:
+- data_ocorrencia: data e hora do incidente no formato YYYY-MM-DD HH:MM (se mencionada)
+- local: local onde o incidente ocorreu
+- tipo_incidente: tipo ou categoria do incidente
+- impacto: descrição breve do impacto causado
 
-CRITICAL RULES:
-1. Return ONLY a valid JSON object
-2. Do not add any text before or after the JSON
-3. Do not add explanations
-4. Use double quotes for strings
-5. If information is not present, use null
-6. Do not break lines inside string values
-7. Format must be exactly: {{"key": "value", "key2": "value2"}}
+REGRAS CRÍTICAS:
+1. Retorne APENAS um objeto JSON válido
+2. Não adicione texto antes ou depois do JSON
+3. Não adicione explicações
+4. Use aspas duplas para strings
+5. Se a informação não estiver presente, use null
+6. Não quebre linhas dentro dos valores de string
+7. O formato deve ser exatamente: {{"chave": "valor", "chave2": "valor2"}}
 
-EXAMPLES:
+EXEMPLOS:
 
-Input: "Ontem as 14h, no escritorio de Sao Paulo, houve uma falha no servidor principal que afetou o sistema de faturamento por 2 horas."
-Reference date: 2025-02-04
-Output:
-{{"data_ocorrencia": "2025-02-03 14:00", "local": "Sao Paulo", "tipo_incidente": "Falha no servidor", "impacto": "Sistema de faturamento indisponivel por 2 horas"}}
+Entrada: "Ontem às 14h, no escritório de São Paulo, houve uma falha no servidor principal que afetou o sistema de faturamento por 2 horas."
+Data de referência: 2025-02-04
+Saída:
+{{"data_ocorrencia": "2025-02-03 14:00", "local": "São Paulo", "tipo_incidente": "Falha no servidor", "impacto": "Sistema de faturamento indisponível por 2 horas"}}
 
-Input: "Hoje pela manha, houve uma queda de energia no data center de Brasilia afetando todos os servicos criticos."
-Reference date: 2025-02-04
-Output:
-{{"data_ocorrencia": "2025-02-04 09:00", "local": "Brasilia", "tipo_incidente": "Queda de energia", "impacto": "Todos os servicos criticos afetados"}}
+Entrada: "Hoje pela manhã, houve uma queda de energia no data center de Brasília afetando todos os serviços críticos."
+Data de referência: 2025-02-04
+Saída:
+{{"data_ocorrencia": "2025-02-04 09:00", "local": "Brasília", "tipo_incidente": "Queda de energia", "impacto": "Todos os serviços críticos afetados"}}
 
-Input: "Vazamento de dados no banco de clientes detectado pela equipe de seguranca."
-Reference date: 2025-02-04
-Output:
+Entrada: "Vazamento de dados no banco de clientes detectado pela equipe de segurança."
+Data de referência: 2025-02-04
+Saída:
 {{"data_ocorrencia": null, "local": null, "tipo_incidente": "Vazamento de dados", "impacto": "Banco de clientes comprometido"}}
 
-Now process the following description and return ONLY the JSON:
+Entrada: "No dia 27/01 às 15h30, na filial de Campinas, ocorreu um ataque de ransomware que criptografou 500GB de arquivos críticos."
+Data de referência: 2025-02-04
+Saída:
+{{"data_ocorrencia": "2025-01-27 15:30", "local": "Campinas", "tipo_incidente": "Ataque de ransomware", "impacto": "500GB de arquivos críticos criptografados"}}
 
-Description: {incident_description}
-Reference date: {reference_date}
+Agora processe a seguinte descrição e retorne APENAS o JSON:
+
+Descrição: {incident_description}
+Data de referência: {reference_date}
 
 JSON:"""
 
 
 def build_extraction_prompt(incident_description: str, reference_date: str) -> str:
     """
-    Constroi o prompt completo para extracao de informacoes
+    Constrói o prompt completo para extração de informações
+
+    Args:
+        incident_description: Descrição do incidente (já pré-processada)
+        reference_date: Data de referência no formato YYYY-MM-DD
+
+    Returns:
+        Prompt formatado pronto para envio ao LLM
     """
     return INCIDENT_EXTRACTION_PROMPT.format(
         incident_description=incident_description, reference_date=reference_date

@@ -35,8 +35,8 @@ class TestBuildExtractionPrompt:
     def test_prompt_contains_examples(self):
         """Deve conter exemplos few-shot"""
         prompt = build_extraction_prompt("Incidente", "2025-02-04")
-        assert "Sao Paulo" in prompt
-        assert "Brasilia" in prompt
+        assert "São Paulo" in prompt
+        assert "Brasília" in prompt
 
     def test_prompt_template_not_empty(self):
         """Template base nao deve estar vazio"""
