@@ -34,6 +34,8 @@ curl http://localhost:8000/health
 
 ### POST /extract-incident
 
+A descricao deve ter no minimo 10 caracteres.
+
 ```bash
 curl -X POST "http://localhost:8000/extract-incident" \
   -H "Content-Type: application/json" \
@@ -64,6 +66,7 @@ Acesse: http://localhost:8000/docs
 | `/health` | GET | Status da API e Ollama |
 | `/extract-incident` | POST | Extrai informacoes de incidente |
 | `/models` | GET | Lista modelos disponiveis |
+| `/config` | GET | Configuracoes atuais da aplicacao |
 | `/docs` | GET | Documentacao Swagger |
 
 ## Funcionalidades
@@ -116,6 +119,7 @@ incident-extractor/
 │   ├── models.py            # Schemas Pydantic
 │   ├── prompts.py           # Templates de prompt
 │   ├── exceptions.py        # Excecoes customizadas
+│   ├── config.py            # Configuracao centralizada
 │   ├── logging_config.py    # Configuracao de logging JSON
 │   ├── rate_limiter.py      # Configuracao de rate limiting
 │   └── services/
@@ -130,9 +134,13 @@ incident-extractor/
 │   ├── test_preprocessor.py # Testes do preprocessor
 │   ├── test_prompts.py      # Testes dos prompts
 │   ├── test_exceptions.py   # Testes das excecoes
+│   ├── test_config.py       # Testes da configuracao
 │   ├── test_logging_config.py # Testes do logging
 │   ├── test_rate_limiter.py # Testes do rate limiter
 │   └── test_integration.py  # Testes de integracao reais
+├── .github/
+│   └── workflows/
+│       └── ci.yml           # Pipeline CI/CD
 ├── requirements.txt
 ├── pytest.ini
 ├── Dockerfile
@@ -171,14 +179,46 @@ pytest tests/test_integration.py -v --run-integration
 docker-compose exec api pytest tests/ -v --ignore=tests/test_integration.py
 ```
 
+### CI/CD
+
+O projeto inclui pipeline de CI/CD via GitHub Actions (`.github/workflows/ci.yml`) que executa:
+
+1. **Job `test`**: Testes unitarios com cobertura de codigo
+2. **Job `integration-test`**: Testes de integracao com Ollama real em container
+
+O pipeline e executado automaticamente em pushes e pull requests para branches `main` e `master`.
+
 ## Variaveis de Ambiente
+
+### Configuracao do Ollama
 
 | Variavel | Padrao | Descricao |
 |----------|--------|-----------|
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | URL do servico Ollama |
 | `OLLAMA_MODEL` | `qwen2:0.5b` | Modelo a ser utilizado |
+| `OLLAMA_TIMEOUT` | `180.0` | Timeout em segundos (1-600) |
+| `OLLAMA_MAX_RETRIES` | `3` | Tentativas em caso de falha (1-10) |
+
+### Rate Limiting
+
+| Variavel | Padrao | Descricao |
+|----------|--------|-----------|
 | `RATE_LIMIT_EXTRACT` | `10/minute` | Limite para `/extract-incident` |
 | `RATE_LIMIT_DEFAULT` | `60/minute` | Limite para outros endpoints |
+
+### Logging e API
+
+| Variavel | Padrao | Descricao |
+|----------|--------|-----------|
+| `LOG_LEVEL` | `INFO` | Nivel de log (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
+| `SERVICE_NAME` | `incident-extractor` | Nome do servico nos logs |
+
+### Validacao de Resposta do LLM
+
+| Variavel | Padrao | Descricao |
+|----------|--------|-----------|
+| `VALIDATE_LLM_RESPONSE` | `True` | Habilita validacao de schema |
+| `ALLOW_PARTIAL_RESPONSE` | `True` | Permite respostas com campos null |
 
 ## Troubleshooting
 
@@ -204,6 +244,9 @@ A primeira requisicao pode demorar mais (carregamento do modelo na memoria). Agu
 ### Rate limit excedido
 Aguarde o tempo indicado no header `Retry-After` ou ajuste os limites via variaveis de ambiente.
 
+### Erro de validacao (422)
+A descricao do incidente deve ter no minimo 10 caracteres.
+
 ## Decisoes Tecnicas
 
 - **qwen2:0.5b**: Modelo ultra-leve (~400MB), ideal para ambientes com recursos limitados
@@ -212,6 +255,7 @@ Aguarde o tempo indicado no header `Retry-After` ou ajuste os limites via variav
 - **Rate Limiting (slowapi)**: Protecao contra abuso, configuravel por endpoint
 - **Retry com backoff**: Resiliencia em caso de falhas temporarias
 - **Request ID**: Rastreabilidade de requisicoes end-to-end
+- **pydantic-settings**: Configuracao centralizada com validacao
 
 ---
 
