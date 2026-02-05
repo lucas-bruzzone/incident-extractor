@@ -26,24 +26,6 @@ class TestIncidentPreprocessor:
         result = preprocessor._normalize_whitespace(text)
         assert result == "texto com espacos"
 
-    def test_normalize_relative_dates_hoje(self, preprocessor):
-        """Deve normalizar 'HOJE' para 'hoje'"""
-        text = "HOJE houve um incidente"
-        result = preprocessor._normalize_relative_dates(text)
-        assert "hoje" in result
-
-    def test_normalize_relative_dates_ontem(self, preprocessor):
-        """Deve normalizar 'ONTEM' para 'ontem'"""
-        text = "ONTEM houve um incidente"
-        result = preprocessor._normalize_relative_dates(text)
-        assert "ontem" in result
-
-    def test_normalize_relative_dates_anteontem(self, preprocessor):
-        """Deve normalizar 'ANTEONTEM' para 'anteontem'"""
-        text = "ANTEONTEM houve um incidente"
-        result = preprocessor._normalize_relative_dates(text)
-        assert "anteontem" in result
-
     def test_clean_special_chars_keeps_punctuation(self, preprocessor):
         """Deve manter pontuacao basica"""
         text = "Texto com pontuacao: virgula, ponto. Exclamacao! Interrogacao?"

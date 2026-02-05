@@ -2,6 +2,8 @@
 
 API REST para extracao automatica de informacoes estruturadas de descricoes de incidentes usando LLM local (Ollama).
 
+[![codecov](https://codecov.io/gh/lucas-bruzzone/incident-extractor/graph/badge.svg?token=uMa690rs5W)](https://codecov.io/gh/lucas-bruzzone/incident-extractor)
+
 ## Arquitetura
 
 ```
@@ -20,14 +22,41 @@ Cliente (HTTP) --> FastAPI (API REST) --> Ollama (qwen2:0.5b)
 ## Setup Rapido
 
 ```bash
-# 1. Inicie os containers (o modelo sera baixado automaticamente)
+# 1. Clone o repositório
+git clone https://github.com/lucas-bruzzone/incident-extractor
+cd incident-extractor
+
+# 2. (Opcional) Configure variáveis de ambiente
+cp .env.example .env
+# Edite .env conforme necessário
+
+# 3. Inicie os containers (o modelo sera baixado automaticamente)
 docker-compose up -d --build
 
-# 2. Aguarde o download do modelo (~400MB, primeira execucao)
+# 4. Aguarde o download do modelo (~400MB, primeira execucao)
 docker logs -f incident-api
 
-# 3. Teste quando a API estiver pronta
+# 5. Teste quando a API estiver pronta
 curl http://localhost:8000/health
+```
+
+## Configuração
+
+Todas as configurações podem ser ajustadas via variáveis de ambiente. Veja o arquivo `.env.example` para referência completa.
+
+### Principais variáveis:
+
+```bash
+# Ollama
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_MODEL=qwen2:0.5b
+OLLAMA_TIMEOUT=180.0
+
+# Rate Limiting
+RATE_LIMIT_EXTRACT=10/minute
+
+# Logging
+LOG_LEVEL=INFO
 ```
 
 ## Uso da API
@@ -109,6 +138,21 @@ Headers de resposta incluem:
 
 Cada requisicao recebe um `X-Request-ID` unico para rastreamento end-to-end.
 
+### Extração JSON Robusta
+
+O sistema usa regex avançado para extrair JSON de respostas do LLM, lidando com:
+- JSON aninhado
+- Texto antes/depois do JSON
+- Marcadores markdown
+- Chaves desbalanceadas (com correção automática)
+
+### Preprocessamento
+
+O preprocessador resolve automaticamente:
+- Datas relativas: "hoje", "ontem", "anteontem"
+- Formatos variados: DD/MM/YYYY, DD/MM, "15 de janeiro"
+- Horários: "às 10h", "14h30", "pela manhã"
+
 ## Estrutura do Projeto
 
 ```
@@ -137,7 +181,8 @@ incident-extractor/
 │   ├── test_config.py       # Testes da configuracao
 │   ├── test_logging_config.py # Testes do logging
 │   ├── test_rate_limiter.py # Testes do rate limiter
-│   └── test_integration.py  # Testes de integracao reais
+│   └── test_integration.py  # Testes de integracao
+├── .env.example             # Exemplo de configuração
 ├── .github/
 │   └── workflows/
 │       └── ci.yml           # Pipeline CI/CD
@@ -166,8 +211,6 @@ pytest tests/ -v --cov=app --cov-report=term-missing --ignore=tests/test_integra
 
 ### Testes de Integracao
 
-Testes que rodam contra Ollama real:
-
 ```bash
 # Requer Ollama rodando localmente ou via Docker
 pytest tests/test_integration.py -v --run-integration
@@ -190,35 +233,21 @@ O pipeline e executado automaticamente em pushes e pull requests para branches `
 
 ## Variaveis de Ambiente
 
-### Configuracao do Ollama
+Consulte o arquivo `.env.example` para uma lista completa e documentada de todas as variáveis configuráveis.
 
-| Variavel | Padrao | Descricao |
-|----------|--------|-----------|
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | URL do servico Ollama |
-| `OLLAMA_MODEL` | `qwen2:0.5b` | Modelo a ser utilizado |
-| `OLLAMA_TIMEOUT` | `180.0` | Timeout em segundos (1-600) |
-| `OLLAMA_MAX_RETRIES` | `3` | Tentativas em caso de falha (1-10) |
+### Principais categorias:
 
-### Rate Limiting
+**Configuracao do Ollama:**
+- `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT`, `OLLAMA_MAX_RETRIES`
 
-| Variavel | Padrao | Descricao |
-|----------|--------|-----------|
-| `RATE_LIMIT_EXTRACT` | `10/minute` | Limite para `/extract-incident` |
-| `RATE_LIMIT_DEFAULT` | `60/minute` | Limite para outros endpoints |
+**Rate Limiting:**
+- `RATE_LIMIT_EXTRACT`, `RATE_LIMIT_DEFAULT`
 
-### Logging e API
+**Logging:**
+- `LOG_LEVEL`, `SERVICE_NAME`
 
-| Variavel | Padrao | Descricao |
-|----------|--------|-----------|
-| `LOG_LEVEL` | `INFO` | Nivel de log (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
-| `SERVICE_NAME` | `incident-extractor` | Nome do servico nos logs |
-
-### Validacao de Resposta do LLM
-
-| Variavel | Padrao | Descricao |
-|----------|--------|-----------|
-| `VALIDATE_LLM_RESPONSE` | `True` | Habilita validacao de schema |
-| `ALLOW_PARTIAL_RESPONSE` | `True` | Permite respostas com campos null |
+**Validacao de Resposta:**
+- `VALIDATE_LLM_RESPONSE`, `ALLOW_PARTIAL_RESPONSE`
 
 ## Troubleshooting
 
@@ -239,13 +268,14 @@ docker exec incident-ollama ollama pull qwen2:0.5b
 ```
 
 ### Timeout na requisicao
-A primeira requisicao pode demorar mais (carregamento do modelo na memoria). Aguarde ate 3 minutos.
+A primeira requisicao pode demorar mais (carregamento do modelo na memoria). Aguarde ate 3 minutos ou ajuste `OLLAMA_TIMEOUT`.
 
 ### Rate limit excedido
 Aguarde o tempo indicado no header `Retry-After` ou ajuste os limites via variaveis de ambiente.
 
 ### Erro de validacao (422)
 A descricao do incidente deve ter no minimo 10 caracteres.
+
 
 ## Decisoes Tecnicas
 
@@ -256,6 +286,7 @@ A descricao do incidente deve ter no minimo 10 caracteres.
 - **Retry com backoff**: Resiliencia em caso de falhas temporarias
 - **Request ID**: Rastreabilidade de requisicoes end-to-end
 - **pydantic-settings**: Configuracao centralizada com validacao
+- **Regex robusto**: Extração confiável de JSON mesmo com respostas malformadas
 
 ---
 

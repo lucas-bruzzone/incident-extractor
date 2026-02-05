@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Tuple
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -78,104 +78,58 @@ class IncidentPreprocessor:
         Transforma:
         - "hoje" -> "no dia 2026-02-04"
         - "ontem" -> "no dia 2026-02-03"
-        - "anteontem" -> "no dia 2026-02-02"
         - "dia 27/01" -> "no dia 2026-01-27"
-        - "27/01/2026" -> "no dia 2026-01-27"
         - "15 de janeiro" -> "no dia 2026-01-15"
         """
-        # 1. Resolver datas relativas (hoje, ontem, anteontem)
-        text = self._resolve_relative_dates(text)
-
-        # 2. Resolver datas no formato DD/MM/YYYY ou DD/MM/YY
+        text = self._resolve_relative_dates_simple(text)
         text = self._resolve_date_ddmmyyyy(text)
-
-        # 3. Resolver datas no formato DD/MM (sem ano)
         text = self._resolve_date_ddmm(text)
-
-        # 4. Resolver datas por extenso (15 de janeiro, 20 de março)
         text = self._resolve_date_extenso(text)
-
-        # 5. Normalizar horários
         text = self._normalize_time(text)
+        return text
+
+    def _resolve_relative_dates_simple(self, text: str) -> str:
+        """Resolve datas relativas (hoje, ontem, anteontem)"""
+        # Mapa de palavras -> dias atrás
+        relative_words = {"hoje": 0, "ontem": 1, "anteontem": 2}
+
+        for word, days_ago in relative_words.items():
+            text = self._resolve_single_relative_date(text, word, days_ago)
 
         return text
 
-    def _resolve_relative_dates(self, text: str) -> str:
-        """Resolve datas relativas para datas absolutas"""
+    def _resolve_single_relative_date(self, text: str, word: str, days_ago: int) -> str:
+        """Resolve uma única palavra relativa (hoje, ontem, anteontem)"""
+        date_str = self._get_relative_date(days_ago)
 
-        # Padrões com horário opcional
+        # Padrões em ordem de especificidade (do mais específico ao mais genérico)
         patterns = [
-            # "hoje às 10h", "hoje as 14:30", "hoje pela manhã"
+            # Com horário explícito: "hoje às 10h30"
             (
-                r"\bhoje\s+(?:às|as|pela manhã|pela manha|de manhã|de manha)\s*(\d{1,2})(?::(\d{2}))?(?:\s*h(?:oras?)?)?\b",
-                self._replace_relative_with_time,
-                0,
+                rf"\b{word}\s+(?:às|as)\s*(\d{{1,2}})(?::(\d{{2}}))?(?:\s*h(?:oras?)?)?\b",
+                lambda m: f"no dia {date_str} às {m.group(1).zfill(2)}:{m.group(2) or '00'}",
+            ),
+            # Período: "hoje pela manhã"
+            (
+                rf"\b{word}\s+(?:pela manhã|pela manha|de manhã|de manha)\b",
+                lambda m: f"no dia {date_str} às 09:00",
             ),
             (
-                r"\bhoje\s+(?:à tarde|a tarde|de tarde)\b",
-                lambda m: f"no dia {self._get_relative_date(0)} às 14:00",
-                None,
+                rf"\b{word}\s+(?:à tarde|a tarde|de tarde)\b",
+                lambda m: f"no dia {date_str} às 14:00",
             ),
             (
-                r"\bhoje\s+(?:à noite|a noite|de noite)\b",
-                lambda m: f"no dia {self._get_relative_date(0)} às 20:00",
-                None,
+                rf"\b{word}\s+(?:à noite|a noite|de noite)\b",
+                lambda m: f"no dia {date_str} às 20:00",
             ),
-            (r"\bhoje\b", lambda m: f"no dia {self._get_relative_date(0)}", None),
-            # "ontem às 10h", etc.
-            (
-                r"\bontem\s+(?:às|as)\s*(\d{1,2})(?::(\d{2}))?(?:\s*h(?:oras?)?)?\b",
-                self._replace_relative_with_time,
-                1,
-            ),
-            (
-                r"\bontem\s+(?:pela manhã|pela manha|de manhã|de manha)\b",
-                lambda m: f"no dia {self._get_relative_date(1)} às 09:00",
-                None,
-            ),
-            (
-                r"\bontem\s+(?:à tarde|a tarde|de tarde)\b",
-                lambda m: f"no dia {self._get_relative_date(1)} às 14:00",
-                None,
-            ),
-            (
-                r"\bontem\s+(?:à noite|a noite|de noite)\b",
-                lambda m: f"no dia {self._get_relative_date(1)} às 20:00",
-                None,
-            ),
-            (r"\bontem\b", lambda m: f"no dia {self._get_relative_date(1)}", None),
-            # "anteontem às 10h", etc.
-            (
-                r"\banteontem\s+(?:às|as)\s*(\d{1,2})(?::(\d{2}))?(?:\s*h(?:oras?)?)?\b",
-                self._replace_relative_with_time,
-                2,
-            ),
-            (r"\banteontem\b", lambda m: f"no dia {self._get_relative_date(2)}", None),
+            # Palavra sozinha: "hoje"
+            (rf"\b{word}\b", lambda m: f"no dia {date_str}"),
         ]
 
-        for pattern, replacer, days_offset in patterns:
-            if (
-                days_offset is not None
-                and callable(replacer)
-                and replacer == self._replace_relative_with_time
-            ):
-                text = re.sub(
-                    pattern,
-                    lambda m, d=days_offset: self._replace_relative_with_time(m, d),
-                    text,
-                    flags=re.IGNORECASE,
-                )
-            else:
-                text = re.sub(pattern, replacer, text, flags=re.IGNORECASE)
+        for pattern, replacement in patterns:
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
         return text
-
-    def _replace_relative_with_time(self, match: re.Match, days_offset: int) -> str:
-        """Substitui data relativa com horário"""
-        date_str = self._get_relative_date(days_offset)
-        hour = match.group(1).zfill(2)
-        minute = match.group(2) if match.group(2) else "00"
-        return f"no dia {date_str} às {hour}:{minute}"
 
     def _get_relative_date(self, days_ago: int) -> str:
         """Retorna data no formato ISO para N dias atrás"""
@@ -231,7 +185,7 @@ class IncidentPreprocessor:
             except ValueError:
                 return match.group(0)  # Data inválida, manter original
 
-        # Padrão: "dia 27/01", "em 27/01" - mas NÃO seguido de mais dígitos (para não pegar DD/MM/YYYY)
+        # Padrão: "dia 27/01", "em 27/01" - mas NÃO seguido de mais dígitos
         pattern = r"((?:dia|em|de)\s+)?(\d{1,2})/(\d{1,2})(?!/\d)"
         return re.sub(pattern, replace_date, text, flags=re.IGNORECASE)
 
@@ -275,32 +229,15 @@ class IncidentPreprocessor:
     def _normalize_time(self, text: str) -> str:
         """Normaliza formatos de horário para HH:MM"""
 
-        def replace_time(match: re.Match) -> str:
-            prefix = match.group(1)
-            hour = match.group(2).zfill(2)
-            minute = match.group(3) if match.group(3) else "00"
-            return f"{prefix}{hour}:{minute}"
-
-        # Padrões: "às 10h", "as 14h30", "às 9:30", "às 10 horas"
-        pattern = r"(às\s+|as\s+)(\d{1,2})(?::(\d{2})|\s*h(?:oras?)?(\d{2})?)"
-
         def complex_replace(match: re.Match) -> str:
             prefix = match.group(1)
             hour = match.group(2).zfill(2)
             minute = match.group(3) or match.group(4) or "00"
             return f"{prefix}{hour}:{minute}"
 
+        # Padrões: "às 10h", "as 14h30", "às 9:30", "às 10 horas"
+        pattern = r"(às\s+|as\s+)(\d{1,2})(?::(\d{2})|\s*h(?:oras?)?(\d{2})?)"
         return re.sub(pattern, complex_replace, text, flags=re.IGNORECASE)
-
-    def _normalize_relative_dates(self, text: str) -> str:
-        """
-        DEPRECATED: Mantido para compatibilidade com testes existentes.
-        Use _resolve_dates() que já inclui esta funcionalidade.
-        """
-        text = re.sub(r"\bhoje\b", "hoje", text, flags=re.IGNORECASE)
-        text = re.sub(r"\bontem\b", "ontem", text, flags=re.IGNORECASE)
-        text = re.sub(r"\banteontem\b", "anteontem", text, flags=re.IGNORECASE)
-        return text
 
     def _clean_special_chars(self, text: str) -> str:
         """Remove caracteres especiais problematicos"""
