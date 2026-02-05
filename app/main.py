@@ -10,6 +10,7 @@ import uuid
 from app.models import IncidentRequest, IncidentResponse
 from app.services.llm_service import OllamaService
 from app.services.preprocessor import IncidentPreprocessor
+from app.config import get_settings
 from app.exceptions import (
     IncidentExtractorError,
     LLMConnectionError,
@@ -19,10 +20,13 @@ from app.exceptions import (
     PreprocessingError,
 )
 from app.logging_config import setup_logging, get_logger, request_context_filter
-from app.rate_limiter import limiter, setup_rate_limiting, RATE_LIMIT_EXTRACT
+from app.rate_limiter import limiter, setup_rate_limiting
+
+# Carrega configurações
+settings = get_settings()
 
 # Configura logging estruturado JSON
-setup_logging()
+setup_logging(level=settings.log_level)
 logger = get_logger(__name__)
 
 ollama_service: OllamaService = None
@@ -34,7 +38,18 @@ async def lifespan(app: FastAPI):
     """Gerencia o ciclo de vida da aplicacao"""
     global ollama_service, preprocessor
 
-    logger.info("Iniciando servicos")
+    logger.info(
+        "Iniciando servicos",
+        extra={
+            "config": {
+                "ollama_url": settings.ollama_base_url,
+                "model": settings.ollama_model,
+                "timeout": settings.ollama_timeout,
+                "log_level": settings.log_level,
+            }
+        },
+    )
+
     ollama_service = OllamaService()
     preprocessor = IncidentPreprocessor()
 
@@ -59,9 +74,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Incident Information Extractor API",
+    title=settings.api_title,
     description="API para extracao automatica de informacoes estruturadas de descricoes de incidentes usando LLM",
-    version="1.0.0",
+    version=settings.api_version,
     lifespan=lifespan,
 )
 
@@ -70,7 +85,7 @@ setup_rate_limiting(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -254,8 +269,8 @@ async def incident_extractor_error_handler(
 async def root():
     """Endpoint raiz com informacoes da API"""
     return {
-        "service": "Incident Information Extractor",
-        "version": "1.0.0",
+        "service": settings.api_title,
+        "version": settings.api_version,
         "status": "running",
         "timestamp": datetime.now().isoformat(),
     }
@@ -290,7 +305,7 @@ async def health_check():
         504: {"description": "Timeout na comunicação com o LLM"},
     },
 )
-@limiter.limit(RATE_LIMIT_EXTRACT)
+@limiter.limit(lambda: get_settings().rate_limit_extract)
 async def extract_incident(request: Request, incident_request: IncidentRequest):
     """
     Processa a descricao de um incidente e extrai informacoes estruturadas.
@@ -324,7 +339,11 @@ async def extract_incident(request: Request, incident_request: IncidentRequest):
 
     logger.info(
         "Texto pre-processado",
-        extra={"request_id": request_id, "reference_date": reference_date},
+        extra={
+            "request_id": request_id,
+            "reference_date": reference_date,
+            "processed_text_preview": processed_text[:100] if processed_text else "",
+        },
     )
 
     start_time = datetime.now()
@@ -366,6 +385,21 @@ async def list_models():
         raise LLMConnectionError(
             message="Não foi possível listar modelos do Ollama", details=str(e)
         )
+
+
+@app.get("/config", tags=["Admin"])
+async def get_current_config():
+    """Retorna configuração atual da aplicação (sem dados sensíveis)"""
+    return {
+        "ollama_base_url": settings.ollama_base_url,
+        "ollama_model": settings.ollama_model,
+        "ollama_timeout": settings.ollama_timeout,
+        "rate_limit_extract": settings.rate_limit_extract,
+        "rate_limit_default": settings.rate_limit_default,
+        "log_level": settings.log_level,
+        "validate_llm_response": settings.validate_llm_response,
+        "allow_partial_response": settings.allow_partial_response,
+    }
 
 
 if __name__ == "__main__":

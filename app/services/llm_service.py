@@ -2,11 +2,11 @@
 
 import httpx
 import json
-import os
 import asyncio
-from typing import Dict
+from typing import Dict, Any, Optional
 from app.models import IncidentResponse
 from app.prompts import build_extraction_prompt
+from app.config import get_settings
 from app.exceptions import (
     LLMConnectionError,
     LLMTimeoutError,
@@ -17,21 +17,148 @@ from app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Campos esperados na resposta do LLM
+EXPECTED_FIELDS = {"data_ocorrencia", "local", "tipo_incidente", "impacto"}
+
+
+class ResponseValidator:
+    """Validador de schema para respostas do LLM"""
+
+    def __init__(self, allow_partial: bool = True):
+        """
+        Args:
+            allow_partial: Se True, permite campos faltando (serão null)
+        """
+        self.allow_partial = allow_partial
+
+    def validate(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Valida e normaliza a resposta do LLM.
+
+        Args:
+            data: Dicionário parseado do JSON
+
+        Returns:
+            Dicionário validado e normalizado
+
+        Raises:
+            JSONParsingError: Se validação falhar
+        """
+        if not isinstance(data, dict):
+            raise JSONParsingError(
+                message="Resposta do LLM não é um objeto JSON",
+                details=f"Tipo recebido: {type(data).__name__}",
+            )
+
+        # Verificar campos desconhecidos
+        unknown_fields = set(data.keys()) - EXPECTED_FIELDS
+        if unknown_fields:
+            logger.warning(
+                "Campos desconhecidos na resposta do LLM",
+                extra={"unknown_fields": list(unknown_fields)},
+            )
+
+        # Verificar campos faltando
+        missing_fields = EXPECTED_FIELDS - set(data.keys())
+        if missing_fields:
+            if self.allow_partial:
+                logger.info(
+                    "Campos faltando na resposta (preenchendo com null)",
+                    extra={"missing_fields": list(missing_fields)},
+                )
+                # Preencher campos faltando com None
+                for field in missing_fields:
+                    data[field] = None
+            else:
+                raise JSONParsingError(
+                    message="Campos obrigatórios faltando na resposta",
+                    details=f"Campos faltando: {missing_fields}",
+                )
+
+        # Validar e normalizar cada campo
+        validated = {}
+        for field in EXPECTED_FIELDS:
+            value = data.get(field)
+            validated[field] = self._normalize_field(field, value)
+
+        return validated
+
+    def _normalize_field(self, field: str, value: Any) -> Optional[str]:
+        """Normaliza valor de um campo"""
+        # Tratar valores nulos
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            if value.lower() in ("null", "none", "n/a", "na", "", "-"):
+                return None
+
+        # Converter para string se necessário
+        if not isinstance(value, str):
+            logger.warning(
+                f"Campo {field} não é string, convertendo",
+                extra={"field": field, "type": type(value).__name__},
+            )
+            value = str(value)
+
+        # Validações específicas por campo
+        if field == "data_ocorrencia":
+            return self._validate_date(value)
+
+        return value if value else None
+
+    def _validate_date(self, value: str) -> Optional[str]:
+        """
+        Valida formato de data.
+        A normalização final é feita pelo Pydantic no IncidentResponse.
+        """
+        if not value or value.lower() in ("null", "none"):
+            return None
+
+        # Verificar se contém pelo menos números que parecem data
+        import re
+
+        if not re.search(r"\d{2,4}[-/]\d{1,2}[-/]\d{1,2}", value):
+            logger.warning(
+                "Formato de data não reconhecido",
+                extra={"value": value},
+            )
+            # Retornar mesmo assim, o Pydantic tentará normalizar
+
+        return value
+
 
 class OllamaService:
     """Cliente para comunicacao com API Ollama"""
 
-    def __init__(self, base_url: str = None, model: str = None, timeout: float = 180.0):
-        self.base_url = base_url or os.getenv(
-            "OLLAMA_BASE_URL", "http://localhost:11434"
+    def __init__(
+        self,
+        base_url: str = None,
+        model: str = None,
+        timeout: float = None,
+    ):
+        settings = get_settings()
+
+        self.base_url = base_url or settings.ollama_base_url
+        self.model = model or settings.ollama_model
+        self.timeout = timeout or settings.ollama_timeout
+        self.max_retries = settings.ollama_max_retries
+        self.client = httpx.AsyncClient(timeout=self.timeout)
+
+        # Configurar validador de resposta
+        self.validator = ResponseValidator(
+            allow_partial=settings.allow_partial_response
         )
-        self.model = model or os.getenv("OLLAMA_MODEL", "tinyllama")
-        self.timeout = timeout
-        self.client = httpx.AsyncClient(timeout=timeout)
+        self.validate_response = settings.validate_llm_response
 
         logger.info(
             "OllamaService inicializado",
-            extra={"base_url": self.base_url, "model": self.model},
+            extra={
+                "base_url": self.base_url,
+                "model": self.model,
+                "timeout": self.timeout,
+                "validate_response": self.validate_response,
+            },
         )
 
     async def extract_incident_info(
@@ -55,14 +182,29 @@ class OllamaService:
 
         response = await self._generate_with_retry(prompt)
 
+        # Extrair JSON da resposta
         json_data = self._extract_json(response)
 
+        # Validar schema se habilitado
+        if self.validate_response:
+            json_data = self.validator.validate(json_data)
+
+        # Criar objeto de resposta (Pydantic faz validação adicional)
         incident_data = IncidentResponse(**json_data)
 
-        logger.info("Extracao concluida com sucesso")
+        logger.info(
+            "Extracao concluida com sucesso",
+            extra={
+                "has_date": incident_data.data_ocorrencia is not None,
+                "has_local": incident_data.local is not None,
+                "has_tipo": incident_data.tipo_incidente is not None,
+                "has_impacto": incident_data.impacto is not None,
+            },
+        )
+
         return incident_data
 
-    async def _generate_with_retry(self, prompt: str, max_retries: int = 3) -> str:
+    async def _generate_with_retry(self, prompt: str, max_retries: int = None) -> str:
         """
         Envia prompt para o modelo Ollama com retry
 
@@ -70,9 +212,10 @@ class OllamaService:
             LLMConnectionError: Após todas tentativas falharem por conexão
             LLMTimeoutError: Após todas tentativas falharem por timeout
         """
+        retries = max_retries or self.max_retries
         last_error = None
 
-        for attempt in range(max_retries):
+        for attempt in range(retries):
             try:
                 return await self._generate(prompt)
             except LLMTimeoutError:
@@ -84,7 +227,7 @@ class OllamaService:
                     "Tentativa falhou, aguardando retry",
                     extra={
                         "attempt": attempt + 1,
-                        "max_retries": max_retries,
+                        "max_retries": retries,
                         "wait_time": wait_time,
                         "error": e.message,
                     },
@@ -99,7 +242,7 @@ class OllamaService:
                     "Tentativa falhou com erro inesperado",
                     extra={
                         "attempt": attempt + 1,
-                        "max_retries": max_retries,
+                        "max_retries": retries,
                         "wait_time": wait_time,
                         "error": str(e),
                     },

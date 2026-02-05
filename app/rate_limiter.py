@@ -6,11 +6,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from fastapi import Request, FastAPI
 from fastapi.responses import JSONResponse
-import os
 
-# Configuração via variáveis de ambiente
-RATE_LIMIT_EXTRACT = os.getenv("RATE_LIMIT_EXTRACT", "10/minute")
-RATE_LIMIT_DEFAULT = os.getenv("RATE_LIMIT_DEFAULT", "60/minute")
+from app.config import get_settings
 
 
 def get_client_ip(request: Request) -> str:
@@ -27,6 +24,21 @@ def get_client_ip(request: Request) -> str:
 limiter = Limiter(key_func=get_client_ip)
 
 
+def get_rate_limit_extract() -> str:
+    """Retorna limite de rate para endpoint extract"""
+    return get_settings().rate_limit_extract
+
+
+def get_rate_limit_default() -> str:
+    """Retorna limite de rate padrão"""
+    return get_settings().rate_limit_default
+
+
+# Exportar para uso direto (compatibilidade)
+RATE_LIMIT_EXTRACT = get_settings().rate_limit_extract
+RATE_LIMIT_DEFAULT = get_settings().rate_limit_default
+
+
 async def rate_limit_exceeded_handler(
     request: Request, exc: RateLimitExceeded
 ) -> JSONResponse:
@@ -34,6 +46,8 @@ async def rate_limit_exceeded_handler(
     Handler customizado para erro de rate limit
     Retorna resposta JSON consistente com outros erros da API
     """
+    settings = get_settings()
+
     return JSONResponse(
         status_code=429,
         content={
@@ -44,7 +58,7 @@ async def rate_limit_exceeded_handler(
         },
         headers={
             "Retry-After": str(exc.detail.split()[-1]) if exc.detail else "60",
-            "X-RateLimit-Limit": RATE_LIMIT_EXTRACT,
+            "X-RateLimit-Limit": settings.rate_limit_extract,
         },
     )
 

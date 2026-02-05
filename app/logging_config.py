@@ -99,20 +99,30 @@ class RequestContextFilter(logging.Filter):
 request_context_filter = RequestContextFilter()
 
 
-def setup_logging(level: str = "INFO") -> None:
+def setup_logging(level: str = "INFO", service_name: str = None) -> None:
     """
     Configura logging estruturado JSON para toda a aplicação
 
     Args:
         level: Nível de log (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        service_name: Nome do serviço para logs (opcional, usa config se não fornecido)
     """
+    # Importa aqui para evitar circular import
+    if service_name is None:
+        try:
+            from app.config import get_settings
+
+            service_name = get_settings().service_name
+        except Exception:
+            service_name = "incident-extractor"
+
     # Remove handlers existentes
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
 
     # Configura handler com JSON formatter
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
+    handler.setFormatter(JSONFormatter(service_name=service_name))
     handler.addFilter(request_context_filter)
 
     # Configura root logger

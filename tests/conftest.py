@@ -7,9 +7,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from datetime import datetime
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.services.preprocessor import IncidentPreprocessor
 from app.models import IncidentResponse
 
@@ -43,9 +43,33 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture
-def client():
+def mock_settings():
+    """Mock das configurações para testes"""
+    mock = MagicMock()
+    mock.ollama_base_url = "http://ollama:11434"
+    mock.ollama_model = "qwen2:0.5b"
+    mock.ollama_timeout = 180.0
+    mock.ollama_max_retries = 3
+    mock.rate_limit_extract = "10/minute"
+    mock.rate_limit_default = "60/minute"
+    mock.log_level = "INFO"
+    mock.service_name = "incident-extractor"
+    mock.api_title = "Incident Information Extractor"
+    mock.api_version = "1.0.0"
+    mock.cors_origins = ["*"]
+    mock.validate_llm_response = True
+    mock.allow_partial_response = True
+    return mock
+
+
+@pytest.fixture
+def client(mock_settings):
     """Cliente de teste para a API"""
-    return TestClient(app)
+    with patch("app.main.get_settings", return_value=mock_settings):
+        with patch("app.rate_limiter.get_settings", return_value=mock_settings):
+            from app.main import app
+
+            return TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture

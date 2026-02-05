@@ -28,7 +28,7 @@ class TestRootEndpoint:
         """Deve retornar informacoes do servico"""
         response = client_simple.get("/")
         data = response.json()
-        assert data["service"] == "Incident Information Extractor"
+        assert data["service"] == "Incident Information Extractor API"
         assert data["version"] == "1.0.0"
         assert data["status"] == "running"
         assert "timestamp" in data
@@ -251,3 +251,25 @@ class TestRequestTracing:
             response = client.get("/health", headers={"X-Request-ID": "custom-id-123"})
 
         assert response.headers["X-Request-ID"] == "custom-id-123"
+
+
+class TestConfigEndpoint:
+    """Testes para o endpoint de configuracao"""
+
+    def test_config_returns_200(self, client_simple):
+        """Deve retornar status 200"""
+        response = client_simple.get("/config")
+        assert response.status_code == 200
+
+    def test_config_returns_settings(self, client_simple):
+        """Deve retornar configuracoes da aplicacao"""
+        response = client_simple.get("/config")
+        data = response.json()
+
+        assert "ollama_base_url" in data
+        assert "ollama_model" in data
+        assert "ollama_timeout" in data
+        assert "rate_limit_extract" in data
+        assert "log_level" in data
+        assert "validate_llm_response" in data
+        assert "allow_partial_response" in data
